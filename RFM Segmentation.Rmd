@@ -1,0 +1,271 @@
+---
+title: "Customer Segmentation & Retention"
+author: "Harsh Talajia"
+date: "20/03/2021"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE)
+```
+
+## Objectives
+
+A) To find the subset of best customers who are eligible for receiving gift hampers.
+
+B) To find a suitable set of customers to whom the company should provide coupons and offers so as to retain them and avoid their churn.
+
+
+## Methodology
+
+Trying to understand each individual customer's behaviour is not feasible. Behavioural segmentation of customers would enable us to form groups of customers. Customers within a particular group would exhibit similar purchasing behaviour. Hence, each group can have its own separate marketing campaign which is most suitable for it.
+
+
+## Technique used
+
+Based on the data provided, RFM segmentation seems suitable. Customer segments are formed on the basis of three factors:  
+
+**Recency(R)**: How recent was customer's latest purchase.
+
+**Frequency(F)**: How frequently the customer purchased in the given time frame.
+
+**Monetary(M)**: How much the customer spent in the given time frame.
+
+
+## About Data
+
+```{r, results='asis'}
+library(knitr)
+sales<-read.csv("C:/Users/Harsh/Desktop/M.Sc ASA/Myriad Analytics/Sales_Dataset.csv",
+                header=TRUE)
+kable(head(sales[,1:7]))
+kable(head(sales[,8:15]))
+
+```
+
+Transaction level data of 52,190 orders from 9,127 customers with 15 variables is provided.
+
+
+
+## Exploring Data
+
+We add a new variable named 'Revenue' to our data, which is calculated as:  
+Revenue = Quantity * Unit_Price
+
+```{r}
+sales$Revenue=sales$Quantity*sales$Unit_Price
+```
+
+### Checking Missing values
+
+```{r, results='asis'}
+kable(sapply(sales, function(x)sum(is.na(x))))
+```
+
+These 251 rows where Unit_Price is missing are **removed** from the data for subsequent analysis.
+
+```{r}
+sales<-sales[-which(is.na(sales$Unit_Price)),]
+```
+
+
+### Checking Order frequencies
+
+
+```{r, results='asis', fig.height=4}
+library(dplyr)
+cust_count<-sales%>%
+            group_by(Customer_ID)%>%
+            summarise(order_count=n())
+kable(head(cust_count))
+boxplot(cust_count$order_count, main="Boxplot of order_count", col="lightblue", ylab="No. of Orders", xlab=NA)
+# hist(cust_count$order_count,
+#      main="Order frequency", xlim=c(0,20), breaks=100,
+#      xlab="No. of orders", ylab="No. of customers")
+```
+
+Most of the customers have placed less than 20 orders. There are a handful of customers who have placed more than 40 orders.
+
+
+
+```{r, fig.height=4}
+cust_revenue<-sales%>%
+              group_by(Customer_ID)%>%
+              summarise(revenue=sum(Revenue))
+
+hist(cust_revenue$revenue, xlim=c(0,8000), breaks=200,
+     main="Distribution of Revenue by Customers", col="lightblue",
+     xlab="Revenue", ylab="No. of Customers")
+```
+
+Most of the customers have generated a revenue of less than 2000 units so far.
+
+
+
+![](/Users/Harsh/Desktop/M.Sc ASA/Myriad Analytics/Revenue_by_country.png)
+
+USA is the top revenue generating country, followed by China, Australia. and India.
+
+
+### Selecting the Required Variables
+
+Our analysis focuses on customer behaviour. Though Profit is an important KPI, Revenue is more relevant for the analysis, since it directly measures the amount that a customer spends.
+
+Only 3 variables are needed for RFM segmentation: Customer ID, Order Date, and Revenue of the Order. The other variables are dropped.
+There are total 9,126 unique customers in this data.
+
+Final data used for segmentation:
+
+```{r, results='asis'}
+rfm_data<-sales[,c(6,7,16)]
+kable(head(rfm_data), align = 'c')
+```
+\newpage
+
+# RFM Segmentation
+
+## Metrics used:
+
+Recency: How long has it been since the customer's last order? This is the number of days passed between the current date and customer's latest order date.
+
+Frequency: How many times has the customer placed an order? i.e. Number of Orders per customer
+
+Monetary: How much revenue has a customer generated till date? i.e. Sum of Revenue per customer
+
+
+## Assumptions
+
+1. Customers belonging to the same segment exhibit homogeneous behaviour.
+
+2. Recency: Lower the recency value, the better. We assume that the customer who has placed an order more recently will likely place another order in near future.
+
+3. Frequency: The higher the better. Customers who purchased more frequently in past will show up again soon.
+
+4. Monetary: The higher the better. The customers who have generated high revenue in the past will continue to do so in future.
+
+
+## Assigning Scores
+
+A score from 1-4 for each Metric is given to a customer.
+
+Recency values are arranged in ascending order, while the values of other two metrics are arranged in descending order. Top 25% most recent customers will be given a 'Recency' score of 4, then customers lying in 2^nd^ quartile will be given a score of 3, and so on.
+
+In similar way, top 25% most frequent buyers will be given a 'Frequency' score of 4, and top 25% highest revenue generators will have a 'Monetary' score of 4.
+
+```{r, results='asis'}
+scores<-data.frame("Customer_Quartile"=c("Top 25%", "2nd Quartile", "3rd Quartile", "Bottom 25%"), "Score"=c(4,3,2,1))
+kable(scores, align = 'c')
+```
+
+After assigning scores to individual metrics, we concatenate them to determine the overall segment membership of that customer.
+
+```{r}
+library(rfm)
+
+rfm_data$Order_Date<-as.Date(rfm_data$Order_Date)
+analysis_date<-as.Date('2021-03-20')
+
+rfm<-rfm_table_order(rfm_data, Customer_ID, Order_Date,  Revenue, analysis_date, recency_bins = 4,
+frequency_bins = 4, monetary_bins = 4)
+
+rfm_result<-rfm$rfm
+```
+
+We have 4 segments per metric. Hence, if we concatenate the scores of all 3 metrics, we have total 4^3^ = 64 segments.
+
+```{r, results='asis'}
+colnames(rfm_result)<-c("customer_id", "date_most_recent",
+                        "recency_days", "order_count", "revenue",
+                        "R_score", "F_score", "M_score", "RFM_score")
+kable(rfm_result[1:5,-2], align = 'c')
+```
+
+```{r}
+rfm_heatmap(rfm)
+```
+
+The highest revenue generating cell is where Recency and Frequency scores are equal to 4. i.e. Segment 444 comprises of Best Customers.
+
+
+## Reducing the number of Segments
+
+We merge some of the RFM segments together for the sake of feasibility and convenience, and name them as follows:
+
+```{r, results='asis'}
+best_customers<- c(444)
+loyal_customers <- c(334, 342, 343, 344, 433, 434, 443)
+potential_loyalist <-c(332,333,341,412,413,414,431,432,441,442,421,422,423,424)
+recent_customers <- c(411)
+promising <- c(311, 312, 313, 331)
+needing_attention <- c(212,213,214,231,232,233,241,314,321,322,323,324)
+about_to_sleep <- c(211)
+at_risk <- c(112,113,114,131,132,133,142,124,123,122,121,224,223,222,221)
+cant_lose <- c(134,143,144,234,242,243,244)
+hibernating <- c(141)
+lost <- c(111)
+rfm_scores<-as.vector(rfm_result$RFM_score)
+rfm_scores[which(rfm_result$RFM_score %in% best_customers)]="Best Customers"
+rfm_scores[which(rfm_scores %in% potential_loyalist)] = "Potential Loyalist"
+rfm_scores[which(rfm_scores %in% loyal_customers)] = "Loyal Customers"
+rfm_scores[which(rfm_scores %in% recent_customers)] = "Recent Customers"
+rfm_scores[which(rfm_scores %in% promising)] = "Promising"
+rfm_scores[which(rfm_scores %in% needing_attention)] = "Customer Needing Attention"
+rfm_scores[which(rfm_scores %in% about_to_sleep)] = "About to Sleep"
+rfm_scores[which(rfm_scores %in% at_risk)] = "At Risk"
+rfm_scores[which(rfm_scores %in% cant_lose)] = "Can't Lose Them"
+rfm_scores[which(rfm_scores %in% hibernating)] = "Hibernating"
+rfm_scores[which(rfm_scores %in% lost)] = "Lost"
+customer_segment<-data.frame(cus_seg=rfm_scores)
+main_seg<-customer_segment%>%count(cus_seg)%>%arrange(desc(n))%>%rename("Main_Segment" = cus_seg, Count = n)
+sub_segs<-c(paste(at_risk, collapse = ", "),
+            paste(loyal_customers, collapse = ", "),
+            paste(potential_loyalist, collapse = ", "),
+            paste(needing_attention, collapse = ", "),
+            paste(cant_lose, collapse = ", "),
+            paste(lost, collapse = ", "),
+            paste(promising, collapse = ", "),
+            paste(about_to_sleep, collapse = ", "),
+            paste(best_customers, collapse = ", "),
+            paste(recent_customers, collapse = ", "),
+            paste(hibernating, collapse = ", ")
+            )
+temp<-main_seg$Count
+main_seg$Count<-c()
+main_seg$RFM_segments<-sub_segs
+main_seg$Customer_count<-temp
+kable(main_seg)
+```
+
+## Best customers who deserve Gift Hampers
+
+The segment **'Best Customers'** consists of 350 customers who have an **RFM score of 444**. (Score 4 in all 3 metrics)
+
+These are the most loyal customers who buy frequently. They are also top revenue generators.
+
+Therefore, these customers should be awarded with the gift hampers.
+
+
+
+## Customers that need to be Retained
+
+The segment **'Cant lose them'** comprises of 7 RFM sub-segments: 134, 143, 144, 234, 242, 243, 244
+
+This segment consists of 797 customers who have a **low recency score(1 or 2)**, and **high Frequency and Monetary Scores(3 or 4)**.
+
+The high Frequency and Monetary scores of these customers indicate that they have bought often in the past, and they are top revenue generators too. But their low Recency score indicates that for some reason, they haven't purchased anything from the store since a long time.
+
+A possible reason for this behaviour might be that these customers are exploring our competitor's products. To make sure that we do not lose these customers to our competition, we should try to retain them by providing coupons, offers and other incentives.
+
+
+## Subsets of Customers
+
+The files 'best_customers.csv' and 'retain_customers.csv' contain the list of customer IDs of Best customers and customers that need to be retained respectively.
+
+```{r eval=FALSE, include=FALSE}
+best_cust<-rfm_result[rfm_result$RFM_score==444,]
+retain_cust<-rfm_result[rfm_result$RFM_score%in%cant_lose,]
+
+write.csv(best_cust, "C:/Users/Harsh/Desktop/M.Sc ASA/Myriad Analytics/best_customers.csv", row.names = FALSE)
+
+write.csv(retain_cust, "C:/Users/Harsh/Desktop/M.Sc ASA/Myriad Analytics/retain_customers.csv", row.names = FALSE)
+```
